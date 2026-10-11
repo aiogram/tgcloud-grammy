@@ -2,11 +2,11 @@
   // Preset for bot projects: `{ "extends": "@aiogram/tgcloud-grammy/tsconfig.json", "include": ["src"] }`.
   // Type-checks only; `tgcloud-grammy build` does the compiling.
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2025",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     // No DOM and no Node: the runtime is a bare V8 isolate.
-    "lib": ["ES2022"],
+    "lib": ["ES2025"],
     "types": ["@aiogram/tgcloud-grammy/sdk"],
     "strict": true,
     "noEmit": true,

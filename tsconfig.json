@@ -1,10 +1,10 @@
 {
   // Runtime code (bundled into bots): checked against the platform's globals only.
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2025",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022"],
+    "lib": ["ES2025"],
     "types": [],
     "strict": true,
     "skipLibCheck": true,

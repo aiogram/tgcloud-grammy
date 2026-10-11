@@ -34,8 +34,14 @@ test('built bot runs without web globals and keeps schema.js standalone', () => 
   // npm packages live in lib/vendor/, once: never inlined into handlers or duplicated.
   const message = fs.readFileSync(path.join(out, 'handlers/message.js'), 'utf8');
   assert.match(message, /from "\.\.\/lib\/vendor\/aiogram\/tgcloud-grammy\/grammy\.js"/);
+  // Your modules keep their files, found through imports (lib/format.ts only through lib/bot.ts);
+  // lib/typecheck.ts is imported by nothing, so it isn't deployed.
+  assert.match(message, /from "\.\.\/lib\/bot\.js"/);
+  assert.match(fs.readFileSync(path.join(out, 'lib/bot.js'), 'utf8'), /from "\.\/format\.js"/);
+  assert.ok(fs.existsSync(path.join(out, 'lib/format.js')));
+  assert.ok(!fs.existsSync(path.join(out, 'lib/typecheck.js')));
   const outputs = fs.readdirSync(out, { recursive: true }).filter((f) => f.endsWith('.js'));
-  const withGrammy = outputs.filter((f) => fs.readFileSync(path.join(out, f), 'utf8').includes('filterQueryCache'));
+  const withGrammy = outputs.filter((f) => fs.readFileSync(path.join(out, f), 'utf8').includes('grammy:core'));
   assert.equal(withGrammy.length, 1, `grammY is in: ${withGrammy.join(', ')}`);
   assert.match(withGrammy[0], /^lib\/vendor\//);
   // A vendor entry re-exports only what the bot imports (here: InputFile), so the rest is tree-shaken.
@@ -54,6 +60,14 @@ test('built bot runs without web globals and keeps schema.js standalone', () => 
   assert.equal(refused.status, 1);
   assert.match(refused.stderr, /handlers\/poll\.js/);
   assert.ok(fs.existsSync(path.join(out, 'handlers/poll.js')));
+
+  // A handler whose update type disagrees with its file name fails the build.
+  const src = path.join(tmp, 'src');
+  fs.mkdirSync(path.join(src, 'handlers'), { recursive: true });
+  fs.writeFileSync(path.join(src, 'handlers/message.ts'), "export default toHandler(bot, 'callback_query');");
+  const mismatch = spawnSync(process.execPath, [cli, 'build', '--src', src, '--out', path.join(tmp, 'out2')], { encoding: 'utf8' });
+  assert.equal(mismatch.status, 1);
+  assert.match(mismatch.stderr, /handlers\/message\.ts handles "callback_query"/);
 });
 
 test('init replaces untouched starter files and refuses to touch your code', () => {
@@ -84,6 +98,21 @@ test('init replaces untouched starter files and refuses to touch your code', () 
   assert.equal(pkg.scripts.run, 'tgcloud-grammy build && tgcloud run');
   assert.equal(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8'), '.tgcloud/\nnode_modules/\n# Generated from src/ by tgcloud-grammy build\n/tgcloud/\n');
   assert.match(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'), /Intro\.\n\n## This project is TypeScript[\s\S]*## What this project is/);
+
+  // `add` takes `tgcloud add` targets, writes TypeScript starters, keeps existing files and rejects typos.
+  const add = (...args) => spawnSync(process.execPath, [cli, 'add', ...args], { cwd: dir, encoding: 'utf8' });
+  const added = add('handlers/callback_query', 'handlers/message', 'endpoints/getUser', 'lib/util/math');
+  assert.equal(added.status, 0, added.stderr);
+  assert.match(fs.readFileSync(path.join(dir, 'src/handlers/callback_query.ts'), 'utf8'), /toHandler\(bot, 'callback_query'\)/);
+  assert.match(fs.readFileSync(path.join(dir, 'src/endpoints/getUser.ts'), 'utf8'), /defineEndpoint/);
+  assert.ok(fs.existsSync(path.join(dir, 'src/lib/util/math.ts')));
+  assert.match(added.stdout, /message\.ts exists, kept/);
+  const typo = add('handlers/inline_query', 'handlers/callback_querry');
+  assert.equal(typo.status, 1);
+  assert.match(typo.stderr, /"callback_querry" is not an update type/);
+  assert.ok(!fs.existsSync(path.join(dir, 'src/handlers/inline_query.ts'))); // nothing written
+  assert.match(add('handlers').stderr, /Available: .*inline_query/);
+  assert.equal(spawnSync(process.execPath, [cli, 'build'], { cwd: dir }).status, 0);
 
   // Hand-written code in tgcloud/ is never deleted.
   write('tgcloud/lib/mine.js', 'export const x = 1;');

@@ -1,6 +1,6 @@
 # @aiogram/tgcloud-grammy
 
-Write [Telegram Serverless](https://core.telegram.org/bots/serverless) (tgcloud) bots in **TypeScript**, with **npm packages** and **grammY**.
+Write [Telegram Serverless](https://core.telegram.org/bots/serverless) (tgcloud) bots in **TypeScript**, with **npm packages** and **[grammY](https://grammy.dev)**.
 
 The platform runs plain-JS ES modules from a `tgcloud/` folder and lets them import nothing except each other and the platform's `sdk`. This package gives you:
 
@@ -52,8 +52,8 @@ Deploy with `npm run deploy` (typecheck, `tgcloud-grammy build`, `tgcloud push`)
 | `src/handlers/<update_type>.ts` | `tgcloud/handlers/<update_type>.js` | One file per update type you handle: `message`, `callback_query`, `inline_query`, … The platform only sends you update types that have a file. |
 | `src/endpoints/<name>.ts` | `tgcloud/endpoints/<name>.js` | Mini App backend: `POST /api/<name>`. |
 | `src/schema.ts` | `tgcloud/schema.js` | Database tables as named exports. Built as its own module; code importing it imports the real `schema.js`. |
-| `src/lib/**` | `tgcloud/lib/chunks/*.js` | Your code shared by several handlers/endpoints (code used by only one is bundled into it). |
-| npm packages | `tgcloud/lib/vendor/<package>.js` | Each package you import, built once in its own pass, keeping only the exports you import (tree-shaken). Never inlined into handlers, and unchanged when only your code changes. |
+| `src/lib/**` | `tgcloud/lib/**.js` | Your shared code, one output file per source file, so stack traces name your files. Only files something imports are deployed. Code elsewhere (outside `src/handlers`, `src/endpoints`, `src/lib`) is bundled into each module that imports it. |
+| npm packages | `tgcloud/lib/vendor/<package>.js` | Each package you import, built once in its own pass, keeping only the exports you import (tree-shaken) and minified (`--minify` minifies your code too). Never inlined into handlers, and unchanged when only your code changes. |
 
 Each output file's default export is what the platform calls. `handlers/` and `endpoints/` are flat.
 
@@ -95,6 +95,8 @@ export default defineHandler('message', async (message, ctx) => {
 
 ## grammY
 
+Write the bot as in the [grammY docs](https://grammy.dev/guide/); only its creation and the per-update-type entry files differ.
+
 ```ts
 // src/lib/bot.ts
 import { createBot } from '@aiogram/tgcloud-grammy/grammy';
@@ -113,7 +115,7 @@ import { bot } from '../lib/bot.js';
 export default toHandler(bot, 'message');   // src/handlers/callback_query.ts: toHandler(bot, 'callback_query')
 ```
 
-Each update type the bot handles needs its own one-line handler file.
+Each update type the bot handles needs its own one-line handler file: the platform sends only update types that have one. `npx tgcloud-grammy add handlers/callback_query` writes one. It takes the same targets as `tgcloud add` and writes TypeScript into `src/`: `handlers/<update_type>`, `endpoints/<name>`, `lib/<path>`. The build fails if a handler's type and its file name disagree.
 
 - **API calls** go through the platform's `api`. Failures become grammY's usual `GrammyError`.
 - **Files:**
@@ -123,6 +125,8 @@ Each update type the bot handles needs its own one-line handler file.
 - **Errors:** without `bot.catch`, errors are logged and rethrown, as in grammY.
 
 ### Sessions
+
+[grammY sessions](https://grammy.dev/plugins/session) stored in the bot's database:
 
 ```ts
 // src/schema.ts

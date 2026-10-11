@@ -120,3 +120,83 @@ export function init(opts: { githubActions?: boolean } = {}): string[] {
   execSync(`"${process.execPath}" "${process.argv[1]}" build`, { stdio: 'inherit' });
   return done;
 }
+
+// Endpoint names become `POST /api/<name>`.
+export const ENDPOINT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const MODULE_DIRS = ['handlers', 'endpoints', 'lib'];
+const SEGMENT = /^[A-Za-z0-9_-]+$/; // what `tgcloud add` allows per path segment
+
+/** Update types the platform accepts: its cached descriptor, else grammY's list. */
+async function updateTypes(): Promise<readonly string[] | undefined> {
+  try {
+    const caps = JSON.parse(fs.readFileSync('.tgcloud/capabilities.json', 'utf8'));
+    const names = caps.directories?.find((d: { name?: string }) => d.name === 'handlers')?.allowed_names;
+    if (Array.isArray(names) && names.length) return names;
+  } catch {
+    // Not fetched yet (`tgcloud` commands refresh it): fall back to grammY.
+  }
+  // The web build loads in Node without the Node build's warnings. Without
+  // grammY, names aren't checked here, and tsc rejects a typo instead.
+  return import('grammy/web').then((m) => m.API_CONSTANTS.ALL_UPDATE_TYPES, () => undefined);
+}
+
+/**
+ * `tgcloud add` for `src/`: takes the same targets (`handlers/<update_type>`,
+ * `endpoints/<name>`, `lib/<path>`) and writes the TypeScript starter instead.
+ * A handler passes updates to the grammY bot when `src/lib/bot.ts` exists, and
+ * is a `defineHandler` stub otherwise. Existing files are kept.
+ */
+export async function add(targets: string[], srcDir = 'src'): Promise<string[]> {
+  if (!targets.length) throw new InitError('Name the module: tgcloud-grammy add handlers/<update_type> | endpoints/<name> | lib/<name>');
+  const types = await updateTypes();
+  const bot = fs.existsSync(path.join(srcDir, 'lib/bot.ts'));
+
+  // Check every target before writing any.
+  const modules = targets.map((target) => {
+    const [dir, ...rest] = target.replace(/^(src|tgcloud)\//, '').replace(/\.(ts|js)$/, '').replace(/\/+$/, '').split('/');
+    const name = rest.join('/');
+    if (!MODULE_DIRS.includes(dir)) throw new InitError(`Unknown directory "${dir}" in ${target}. Add modules under handlers/, endpoints/ or lib/.`);
+    if (!name) {
+      const free = dir === 'handlers' ? types?.filter((t) => !fs.existsSync(path.join(srcDir, 'handlers', `${t}.ts`))) ?? [] : [];
+      throw new InitError(`Specify a name, e.g. "${dir}/${free[0] ?? 'name'}".${free.length ? ` Available: ${free.join(', ')}.` : ''}`);
+    }
+    if (dir !== 'lib' && rest.length > 1) throw new InitError(`${dir}/ is flat: use a single name, not "${name}".`);
+    if (!rest.every((s) => SEGMENT.test(s))) throw new InitError(`Invalid module name "${name}": use letters, digits, _ and -.`);
+    if (dir === 'handlers' && types && !types.includes(name)) {
+      throw new InitError(`"${name}" is not an update type. Allowed: ${types.join(', ')}.`);
+    }
+    if (dir === 'endpoints' && !ENDPOINT_NAME.test(name)) {
+      throw new InitError(`Endpoint name "${name}" is invalid: use letters, digits and _, not starting with a digit.`);
+    }
+    return { dir, name, file: path.join(srcDir, dir, `${name}.ts`) };
+  });
+
+  const starter = (dir: string, name: string) => {
+    if (dir === 'handlers') {
+      return bot
+        ? `import { toHandler } from '@aiogram/tgcloud-grammy/grammy';\nimport { bot } from '../lib/bot.js';\n\nexport default toHandler(bot, '${name}');\n`
+        : `import { defineHandler } from '@aiogram/tgcloud-grammy';\n\nexport default defineHandler('${name}', async (payload, ctx) => {\n  // payload is update.${name}; ctx.update is the whole update.\n});\n`;
+    }
+    if (dir === 'endpoints') {
+      return `import { defineEndpoint } from '@aiogram/tgcloud-grammy';\n\n` +
+        `// POST /api/${name} from the Mini App. ctx.initData is verified by the platform;\n` +
+        `// input comes from the client, so validate it. Refuse with \`throw new EndpointError(...)\` from 'sdk'.\n` +
+        `export default defineEndpoint(async (input, ctx) => {\n  return {};\n});\n`;
+    }
+    return `// Shared code. Import it from a handler as '../lib/${name}.js'.\nexport {};\n`;
+  };
+
+  const done: string[] = [];
+  for (const { dir, name, file } of modules) {
+    if (fs.existsSync(file)) {
+      done.push(`${file} exists, kept`);
+      continue;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, starter(dir, name));
+    done.push(`created ${file}`);
+  }
+  const handler = modules.find((m) => m.dir === 'handlers');
+  if (bot && handler) done.push(`Handle it in ${path.join(srcDir, 'lib/bot.ts')}, e.g. bot.on('${handler.name}', (ctx) => …)`);
+  return done;
+}

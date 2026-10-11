@@ -2,28 +2,35 @@
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
+import { builtinModules } from 'node:module';
 import { parseArgs } from 'node:util';
-import { init, InitError } from './init.js';
+import { add, ENDPOINT_NAME, init, InitError } from './init.js';
 
 const USAGE = `Usage:
   tgcloud-grammy init [--github-actions]                  set up TypeScript + grammY in this folder
                                                           (--github-actions: deploy on every push to main)
+  tgcloud-grammy add <dir>/<name>... [--src src]         \`tgcloud add\` for src/: writes the TypeScript starter of
+                                                          handlers/<update_type>, endpoints/<name> or lib/<path>
   tgcloud-grammy build [--src src] [--out tgcloud] [--minify]
+                                                          (--minify: your code too; npm packages always are)
 
 Compiles a TypeScript bot into the plain-JS modules the tgcloud CLI deploys:
   src/handlers/<update_type>.ts  -> tgcloud/handlers/<update_type>.js
   src/endpoints/<name>.ts        -> tgcloud/endpoints/<name>.js
+  src/lib/**/*.ts                -> tgcloud/lib/**/*.js (the files your modules import)
   src/schema.ts                  -> tgcloud/schema.js
   npm packages                   -> tgcloud/lib/vendor/<package>.js
-  code shared by your modules    -> tgcloud/lib/chunks/*.js
 Then deploy with \`npx tgcloud push\`.`;
 
 const CODE_DIRS = ['handlers', 'endpoints', 'lib'];
 const MANIFEST = '.tgcloud-grammy.json';
-const SCHEMA_PLACEHOLDER = '__tgcloud_grammy_schema__';
-const VENDOR_PLACEHOLDER = '__tgcloud_grammy_vendor__:';
-const ENDPOINT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const SOURCE_EXT = /\.(ts|mts|js|mjs)$/;
+// `import "__tgcloud_grammy__:lib/bot.js"`: an import of that output file, made
+// relative to each importer once every output's location is known.
+const PLACEHOLDER = '__tgcloud_grammy__:';
+// The update type in `toHandler(bot, 'message')` or `defineHandler('message', …)`.
+const HANDLER_TYPE = /(?:\btoHandler\s*\([^,()]*,|\bdefineHandler\s*\()\s*['"`](\w+)['"`]/g;
+const EXTENSIONS = ['ts', 'mts', 'js', 'mjs'];
+const SOURCE_EXT = new RegExp(`\\.(${EXTENSIONS.join('|')})$`);
 
 class BuildError extends Error {}
 
@@ -35,7 +42,7 @@ function usedVendorNames(outputs: Map<string, string>, specs: string[]): Map<str
   const used = new Map<string, Set<string> | 'all'>(specs.map((s) => [s, new Set<string>()]));
   for (const text of outputs.values()) {
     for (const spec of specs) {
-      const from = JSON.stringify(VENDOR_PLACEHOLDER + spec).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const from = JSON.stringify(PLACEHOLDER + vendorFile(spec)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       for (const [, clause] of text.matchAll(new RegExp(`\\b(?:import|export)\\s*([^;"'\`]*?)\\s*from\\s*${from}`, 'g'))) {
         const names = used.get(spec);
         if (names === 'all') continue;
@@ -63,9 +70,23 @@ function listSources(dir: string): string[] {
 }
 
 function findSchema(srcDir: string): string | undefined {
-  return ['schema.ts', 'schema.mts', 'schema.js', 'schema.mjs']
-    .map((f) => path.join(srcDir, f))
-    .find((f) => fs.existsSync(f));
+  return EXTENSIONS.map((ext) => path.join(srcDir, `schema.${ext}`)).find((f) => fs.existsSync(f));
+}
+
+/**
+ * Where a source file is deployed (`src/lib/bot.ts` -> `lib/bot.js`), or
+ * undefined for files outside the platform's layout, which are bundled into
+ * the modules that import them.
+ */
+function outputPath(srcDir: string, file: string): string | undefined {
+  const rel = path.relative(srcDir, file).split(path.sep).join('/');
+  if (!SOURCE_EXT.test(rel) || rel.endsWith('.d.ts')) return;
+  if (/^(handlers|endpoints)\/[^/]+$|^lib\/|^schema\.[^/]+$/.test(rel)) return rel.replace(SOURCE_EXT, '.js');
+}
+
+// Module names on the platform: keep to letters, digits, `_`, `-` and `/`.
+function vendorFile(spec: string): string {
+  return `lib/vendor/${spec.replace(/^@/, '').replace(/[^A-Za-z0-9_/-]/g, '_')}.js`;
 }
 
 /** `.js` files the build would overwrite or delete, relative to `outDir`. */
@@ -89,11 +110,20 @@ async function build(opts: { src: string; out: string; minify?: boolean }): Prom
   const srcDir = path.resolve(opts.src);
   const outDir = path.resolve(opts.out);
 
-  const entries = [
-    ...listSources(path.join(srcDir, 'handlers')),
-    ...listSources(path.join(srcDir, 'endpoints')),
-  ];
-  for (const file of listSources(path.join(srcDir, 'endpoints'))) {
+  const handlers = listSources(path.join(srcDir, 'handlers'));
+  const endpoints = listSources(path.join(srcDir, 'endpoints'));
+  const entries = [...handlers, ...endpoints];
+  // The platform routes by file name, so handlers/message.ts with toHandler(bot, 'callback_query')
+  // would get messages typed as callback queries. ponytail: a source regex, misses aliased imports.
+  for (const file of handlers) {
+    const name = path.basename(file).replace(SOURCE_EXT, '');
+    for (const [, type] of fs.readFileSync(file, 'utf8').matchAll(HANDLER_TYPE)) {
+      if (type !== name) {
+        throw new BuildError(`${opts.src}/handlers/${path.basename(file)} handles "${type}", but the platform calls it for "${name}" (its file name). Rename the file or change the type.`);
+      }
+    }
+  }
+  for (const file of endpoints) {
     const name = path.basename(file).replace(SOURCE_EXT, '');
     if (!ENDPOINT_NAME.test(name)) {
       throw new BuildError(`Endpoint name "${name}" is invalid: use letters, digits and _, not starting with a digit.`);
@@ -109,7 +139,7 @@ async function build(opts: { src: string; out: string; minify?: boolean }): Prom
     write: false,
     format: 'esm',
     platform: 'neutral',
-    target: 'es2022',
+    target: 'es2025',
     // Prefer builds made for V8 isolates (Cloudflare Workers), then browsers.
     conditions: ['workerd', 'worker', 'browser'],
     mainFields: ['module', 'main'],
@@ -131,52 +161,53 @@ async function build(opts: { src: string; out: string; minify?: boolean }): Prom
     for (const f of result.outputFiles ?? []) outputs.set(path.relative(outDir, f.path).split(path.sep).join('/'), f.text);
   };
 
-  // The platform reads tables from schema.js itself, so it stays a standalone
-  // module and code that imports it is pointed at that file, never a copy.
-  const schemaPath = schema?.replace(SOURCE_EXT, '');
-  const externalSchema: esbuild.Plugin = {
-    name: 'external-schema',
-    setup(b) {
-      b.onResolve({ filter: /schema(\.(ts|mts|js|mjs))?$/ }, (args) => {
-        if (!schemaPath || !args.path.startsWith('.')) return;
-        return path.resolve(args.resolveDir, args.path).replace(SOURCE_EXT, '') === schemaPath
-          ? { path: SCHEMA_PLACEHOLDER, external: true }
-          : undefined;
-      });
-    },
-  };
-
-  // npm packages are built in their own pass into lib/vendor/, and your code
-  // imports them from there. They stay out of handlers, and their files don't
-  // change (or get re-uploaded) when only your code changes.
+  // Your modules keep their own files (src/lib/bot.ts -> lib/bot.js) and import
+  // each other, so a stack trace names your file and an edit changes only it.
+  // npm packages are built in their own pass into lib/vendor/, so they stay out
+  // of your files and don't change (or get re-uploaded) when only your code does.
+  const sources = new Set(entries); // grows with the lib/ files your modules import
   const vendor = new Map<string, string>(); // import specifier -> resolved file
-  const externalVendor: esbuild.Plugin = {
-    name: 'external-vendor',
+  const modules: esbuild.Plugin = {
+    name: 'modules',
     setup(b) {
-      b.onResolve({ filter: /^[^./]/ }, async (args) => {
-        if (args.pluginData?.vendor || args.path === 'sdk' || args.path.startsWith('sdk/') || path.isAbsolute(args.path)) return;
-        const r = await b.resolve(args.path, { kind: args.kind, resolveDir: args.resolveDir, pluginData: { vendor: true } });
+      b.onResolve({ filter: /.*/ }, async (args) => {
+        if (args.kind === 'entry-point' || args.pluginData?.resolving || args.path === 'sdk' || args.path.startsWith('sdk/')) return;
+        const r = await b.resolve(args.path, { kind: args.kind, importer: args.importer, resolveDir: args.resolveDir, pluginData: { resolving: true } });
         if (r.errors.length) return { errors: r.errors };
-        vendor.set(args.path, r.path);
-        return { path: VENDOR_PLACEHOLDER + args.path, external: true };
+        if (r.external) return;
+        const target = outputPath(srcDir, r.path);
+        if (target) {
+          // The platform reads tables from schema.js itself, so it is built on its own below.
+          if (r.path !== schema) sources.add(r.path);
+          return { path: PLACEHOLDER + target, external: true };
+        }
+        if (/^[^./]/.test(args.path) && !path.isAbsolute(args.path)) {
+          vendor.set(args.path, r.path);
+          return { path: PLACEHOLDER + vendorFile(args.path), external: true };
+        }
+        // ponytail: other files (outside src/{handlers,endpoints,lib}) are copied into each
+        // importer, so one imported by two modules exists twice; move it into src/lib/ if that matters.
       });
     },
   };
-  // Module names on the platform: keep to letters, digits, `_`, `-` and `/`.
-  const vendorFile = (spec: string) => `lib/vendor/${spec.replace(/^@/, '').replace(/[^A-Za-z0-9_/-]/g, '_')}.js`;
 
   try {
     if (entries.length) {
-      collect(await esbuild.build({
-        ...common,
-        entryPoints: entries,
-        outbase: srcDir,
-        outdir: outDir,
-        entryNames: '[dir]/[name]',
-        splitting: true,
-        chunkNames: 'lib/chunks/[name]-[hash]',
-        plugins: [externalSchema, externalVendor],
-      }));
+      // A build can find more of your lib/ files; build again until it finds none.
+      let result: esbuild.BuildResult;
+      let found: number;
+      do {
+        found = sources.size;
+        result = await esbuild.build({
+          ...common,
+          entryPoints: [...sources],
+          outbase: srcDir,
+          outdir: outDir,
+          entryNames: '[dir]/[name]',
+          plugins: [modules],
+        });
+      } while (sources.size > found);
+      collect(result);
     }
     if (vendor.size) {
       const used = usedVendorNames(outputs, [...vendor.keys()]);
@@ -190,8 +221,10 @@ async function build(opts: { src: string; out: string; minify?: boolean }): Prom
       // \`grammy\` and \`@aiogram/tgcloud-grammy/grammy\`) exists once: one copy, one instanceof.
       // Each entry re-exports only the names your code imports, so the rest of
       // the package is tree-shaken away (an entry would otherwise keep every export).
+      // Always minified: nobody reads it, and grammY shrinks by about 40%.
       collect(await esbuild.build({
         ...common,
+        minify: true,
         entryPoints: [...vendor.keys()].map((spec) => ({ in: `vendor-entry:${spec}`, out: vendorFile(spec).replace(/\.js$/, '') })),
         outdir: outDir,
         splitting: true,
@@ -212,29 +245,27 @@ async function build(opts: { src: string; out: string; minify?: boolean }): Prom
       }));
     }
     if (schema) {
+      // Self-contained: anything it imports besides sdk/db is bundled into it.
       collect(await esbuild.build({ ...common, entryPoints: [schema], outfile: path.join(outDir, 'schema.js') }));
     }
   } catch (e) {
     const errors = (e as esbuild.BuildFailure).errors;
     if (!errors) throw e;
     const text = (await esbuild.formatMessages(errors, { kind: 'error' })).join('\n');
-    const hint = /Could not resolve "(node:|fs|path|crypto|buffer|stream|http)/.test(text)
+    const builtin = new RegExp(`Could not resolve "(node:|(${builtinModules.join('|')})["/])`);
+    const hint = builtin.test(text)
       ? '\nThe tgcloud runtime has no Node.js built-ins; use a package that runs in browsers or Workers, or `fetch` from `sdk`.'
       : '';
     throw new BuildError(text + hint);
   }
 
   // Point placeholder imports at the real files, relative to each importer.
-  const targets = new Map([[SCHEMA_PLACEHOLDER, 'schema.js']]);
-  for (const spec of vendor.keys()) targets.set(VENDOR_PLACEHOLDER + spec, vendorFile(spec));
+  const placeholder = new RegExp(`"${PLACEHOLDER}([^"]+)"`, 'g');
   for (const [rel, text] of outputs) {
-    let out = text;
-    for (const [placeholder, target] of targets) {
-      let to = path.posix.relative(path.posix.dirname(rel), target);
-      if (!to.startsWith('.')) to = `./${to}`;
-      out = out.replaceAll(JSON.stringify(placeholder), JSON.stringify(to));
-    }
-    outputs.set(rel, out);
+    outputs.set(rel, text.replace(placeholder, (_, target: string) => {
+      const to = path.posix.relative(path.posix.dirname(rel), target);
+      return JSON.stringify(to.startsWith('.') ? to : `./${to}`);
+    }));
   }
 
   // Never delete files this tool did not write: `push` mirrors tgcloud/ to the
@@ -276,7 +307,7 @@ async function main() {
       help: { type: 'boolean', short: 'h' },
     },
   });
-  if (values.help || !['build', 'init'].includes(positionals[0])) {
+  if (values.help || !['build', 'init', 'add'].includes(positionals[0])) {
     console.log(USAGE);
     process.exit(values.help ? 0 : 1);
   }
@@ -284,6 +315,10 @@ async function main() {
     if (positionals[0] === 'init') {
       for (const line of init({ githubActions: values['github-actions'] })) console.log(`  ${line}`);
       console.log('TypeScript project ready: write code in src/, deploy with `npm run deploy`.');
+      return;
+    }
+    if (positionals[0] === 'add') {
+      for (const line of await add(positionals.slice(1), values.src)) console.log(`  ${line}`);
       return;
     }
     const written = await build({ src: values.src!, out: values.out!, minify: values.minify });

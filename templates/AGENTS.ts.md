@@ -10,11 +10,13 @@ apply to `src/` too.
 
 | Source | Builds to | What it is |
 |---|---|---|
-| `src/lib/bot.ts` | (bundled) | The grammY bot: commands and handlers. |
-| `src/handlers/<type>.ts` | `tgcloud/handlers/<type>.js` | One line per update type the bot receives: `export default toHandler(bot, '<type>')`. To receive e.g. `callback_query`, add `src/handlers/callback_query.ts`. |
+| `src/lib/bot.ts` | `tgcloud/lib/bot.js` | The grammY bot: commands and handlers. Put shared code in `src/lib/`; files there are deployed when something imports them. |
+| `src/handlers/<type>.ts` | `tgcloud/handlers/<type>.js` | One line per update type the bot receives: `export default toHandler(bot, '<type>')`. To receive e.g. `callback_query`, run `npx tgcloud-grammy add handlers/callback_query`; without the file, those updates never arrive. |
 | `src/endpoints/<name>.ts` | `tgcloud/endpoints/<name>.js` | Mini App backend: `export default defineEndpoint(...)` from `@aiogram/tgcloud-grammy`. |
 | `src/schema.ts` | `tgcloud/schema.js` | Database tables. |
 | npm packages | `tgcloud/lib/vendor/` | Bundled at build time; only what you import. |
+
+To add a module, use `npx tgcloud-grammy add handlers/<update_type>` (or `endpoints/<name>`, `lib/<name>`), not `tgcloud add`: it writes TypeScript into `src/`, while `tgcloud add` writes JavaScript into `tgcloud/`, which the build refuses to overwrite.
 
 - Bot API: grammY's `ctx.reply(...)`, `ctx.api.*`, routed through the
   platform's `api` (no token needed). The platform `sdk` (`db`, `fetch`, …) is
