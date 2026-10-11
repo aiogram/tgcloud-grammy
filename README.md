@@ -22,14 +22,23 @@ This creates the official tgcloud project (`tgcloud init`), installs TypeScript,
 - `tsconfig.json`
 - `build` / `typecheck` / `deploy` scripts
 - a TypeScript section in `AGENTS.md`
+- `/tgcloud/` in `.gitignore`: it's build output, and `npm run deploy` / `status` / `run` rebuild it before each tgcloud command
 
-It then makes an initial git commit (skip it with `-- --no-git`) and offers to run `tgcloud login`.
+It also asks whether to add `.github/workflows/deploy.yml`, which deploys the bot on every push to `main`; without a terminal, pass `-- --github-actions`. It then makes an initial git commit (skip it with `-- --no-git`) and offers to run `tgcloud login`.
+
+The workflow:
+1. Runs `npm ci`.
+2. Runs `tgcloud fetch`. A CI checkout has no `.tgcloud/` state, and the push still fails if someone deployed in between.
+3. Runs `npm run deploy`.
+4. Runs `tgcloud migrate --safe`, which applies only the changes the CLI classes as safe.
+
+It needs the bot's CLI token as the `TGCLOUD_TOKEN` repository secret (`gh secret set TGCLOUD_TOKEN`). A commented line in it switches to deploying on `v*` tags instead.
 
 Existing tgcloud project:
 
 ```sh
 npm i -D typescript @aiogram/tgcloud-grammy && npm i grammy
-npx tgcloud-grammy init
+npx tgcloud-grammy init                     # add --github-actions for the deploy workflow
 ```
 
 `init` never overwrites a file. It deletes only the starter files `tgcloud init` created and nobody edited since; their hashes are in `.tgcloud/state.json`. If `tgcloud/` holds code you wrote, it stops and asks you to move that code to `src/` first. Afterwards `tgcloud/` is build output.

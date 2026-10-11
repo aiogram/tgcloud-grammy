@@ -6,7 +6,8 @@ import { parseArgs } from 'node:util';
 import { init, InitError } from './init.js';
 
 const USAGE = `Usage:
-  tgcloud-grammy init                                     set up TypeScript + grammY in this folder
+  tgcloud-grammy init [--github-actions]                  set up TypeScript + grammY in this folder
+                                                          (--github-actions: deploy on every push to main)
   tgcloud-grammy build [--src src] [--out tgcloud] [--minify]
 
 Compiles a TypeScript bot into the plain-JS modules the tgcloud CLI deploys:
@@ -271,6 +272,7 @@ async function main() {
       src: { type: 'string', default: 'src' },
       out: { type: 'string', default: 'tgcloud' },
       minify: { type: 'boolean', default: false },
+      'github-actions': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -280,7 +282,7 @@ async function main() {
   }
   try {
     if (positionals[0] === 'init') {
-      for (const line of init()) console.log(`  ${line}`);
+      for (const line of init({ githubActions: values['github-actions'] })) console.log(`  ${line}`);
       console.log('TypeScript project ready: write code in src/, deploy with `npm run deploy`.');
       return;
     }

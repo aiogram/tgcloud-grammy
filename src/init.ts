@@ -23,8 +23,11 @@ function moduleFiles(): string[] {
  * first when the folder isn't a tgcloud project yet. Never overwrites a file and
  * never deletes code you wrote: only starter files `tgcloud init` created and
  * nobody edited since (it records their hashes) are removed.
+ *
+ * With `githubActions`, also adds `.github/workflows/deploy.yml`, which deploys
+ * the bot on every push to main.
  */
-export function init(): string[] {
+export function init(opts: { githubActions?: boolean } = {}): string[] {
   if (!fs.existsSync('package.json')) throw new InitError('No package.json here. Run `npm init -y` first, or use `npm create @aiogram/tgcloud-grammy <dir>`.');
   if (!fs.existsSync('tgcloud.jsonc') && !fs.existsSync('tgcloud.json')) {
     if (!fs.existsSync('node_modules/.bin/tgcloud')) {
@@ -71,23 +74,35 @@ export function init(): string[] {
     copy('src/handlers/message.ts');
   }
   copy('src/schema.ts');
+  if (opts.githubActions) copy('github-deploy.yml', '.github/workflows/deploy.yml');
 
-  // Scripts: build before every deploy. An existing deploy (e.g. "vite build && tgcloud push")
-  // keeps its own steps, with the bot build put in front of the push.
+  // Scripts: tgcloud/ is gitignored build output, so every command that reads it
+  // builds first. An existing script (e.g. "vite build && tgcloud push") keeps its
+  // own steps, with the bot build put in front of the tgcloud command.
   const pkgText = fs.readFileSync('package.json', 'utf8');
   const pkg = JSON.parse(pkgText);
   const scripts: Record<string, string> = (pkg.scripts ??= {});
-  const deploy = scripts.deploy ?? 'tgcloud push';
-  if (!deploy.includes('tgcloud-grammy build')) {
-    scripts.deploy = deploy.includes('tgcloud push')
-      ? deploy.replace('tgcloud push', 'tsc && tgcloud-grammy build && tgcloud push')
-      : `${deploy} && tsc && tgcloud-grammy build && tgcloud push`;
-  }
+  const buildBefore = (name: string, command: string, build: string) => {
+    const current = scripts[name] ?? command;
+    if (current.includes('tgcloud-grammy build')) return;
+    scripts[name] = current.includes(command) ? current.replace(command, `${build} && ${command}`) : `${current} && ${build} && ${command}`;
+  };
+  buildBefore('deploy', 'tgcloud push', 'tsc && tgcloud-grammy build');
+  buildBefore('status', 'tgcloud status', 'tgcloud-grammy build');
+  buildBefore('run', 'tgcloud run', 'tgcloud-grammy build');
   scripts.build ??= 'tgcloud-grammy build';
   scripts.typecheck ??= 'tsc';
   if (JSON.stringify(pkg) !== JSON.stringify(JSON.parse(pkgText))) {
     fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-    done.push('updated package.json scripts (build, typecheck, deploy)');
+    done.push('updated package.json scripts (build, typecheck, deploy, status, run)');
+  }
+
+  // tgcloud/ is generated from src/: keep it out of git, like dist/.
+  const gitignore = fs.existsSync('.gitignore') ? fs.readFileSync('.gitignore', 'utf8') : '';
+  if (!/^\/?tgcloud\/?$/m.test(gitignore)) {
+    const sep = gitignore && !gitignore.endsWith('\n') ? '\n' : '';
+    fs.writeFileSync('.gitignore', `${gitignore}${sep}# Generated from src/ by tgcloud-grammy build\n/tgcloud/\n`);
+    done.push('added /tgcloud/ to .gitignore');
   }
 
   // AGENTS.md is what coding agents read first: it must say to edit src/, not tgcloud/.

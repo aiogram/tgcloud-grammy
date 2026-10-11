@@ -2,7 +2,8 @@
 
 The bot is written in TypeScript under `src/` and compiled by
 [`@aiogram/tgcloud-grammy`](node_modules/@aiogram/tgcloud-grammy/README.md) into `tgcloud/`. Everything in
-`tgcloud/` is **generated**: edits there are overwritten by the next build. The
+`tgcloud/` is **generated** and gitignored: edits there are overwritten by the
+next build, and `npm run deploy` / `status` / `run` build it first. The
 rest of this file describes the platform and the generated `tgcloud/` layout;
 its rules (no npm at runtime, no Node built-ins, relative imports with `.js`)
 apply to `src/` too.
@@ -26,7 +27,8 @@ apply to `src/` too.
 ```
 npm run typecheck   # tsc
 npm run build       # src/ → tgcloud/
-npx tgcloud run handlers/message '{ chat: { id: 1, type: "private" }, from: { id: 1, is_bot: false, first_name: "U" }, text: "hi", message_id: 1, date: 0 }'
+npm run status      # build + compare with the cloud
+npm run run -- handlers/message '{ chat: { id: 1, type: "private" }, from: { id: 1, is_bot: false, first_name: "U" }, text: "hi", message_id: 1, date: 0 }'
 npm run deploy      # typecheck + build + tgcloud push
 ```
 

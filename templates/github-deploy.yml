@@ -1,0 +1,48 @@
+# Deploys the bot to Telegram Serverless on every push to main.
+#
+# Needs the TGCLOUD_TOKEN repository secret: the bot's CLI token from
+# BotFather → your bot → Serverless → CLI Access. Set it with:
+#   gh secret set TGCLOUD_TOKEN
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    # To deploy on version tags instead (git tag v1.0.0 && git push origin v1.0.0),
+    # replace `branches: [main]` above with:
+    # tags: ['v*']
+
+# One deploy at a time; a newer push waits instead of cutting a deploy short.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - run: npm ci
+
+      # A CI checkout has no .tgcloud/ state, and push refuses to overwrite a bot
+      # it never synced with. fetch records the bot's current revision, so the
+      # push still fails if someone deploys in between.
+      - run: npx tgcloud fetch
+
+      # Typecheck, build src/ into tgcloud/, push.
+      - run: npm run deploy
+
+      # Apply schema changes classed safe. Warnings and manual changes are only
+      # reported: run `npx tgcloud migrate` by hand for those (or use --yes here
+      # to apply warnings too).
+      - run: npx tgcloud migrate --safe

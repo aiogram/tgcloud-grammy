@@ -61,7 +61,8 @@ test('init replaces untouched starter files and refuses to touch your code', () 
   const starter = "import { api } from 'sdk';\nexport default async () => {};\n";
   const write = (f, text) => { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), text); };
   // What `tgcloud init` leaves behind, with the starter's hash recorded.
-  write('package.json', JSON.stringify({ name: 'bot', scripts: { deploy: 'tgcloud push' } }));
+  write('package.json', JSON.stringify({ name: 'bot', scripts: { deploy: 'tgcloud push', status: 'tgcloud status' } }));
+  write('.gitignore', '.tgcloud/\nnode_modules/');
   write('tgcloud.jsonc', '{}');
   write('AGENTS.md', '# AGENTS.md\n\nIntro.\n\n## What this project is\n');
   write('tgcloud/handlers/message.js', starter);
@@ -70,14 +71,18 @@ test('init replaces untouched starter files and refuses to touch your code', () 
   fs.mkdirSync(path.join(dir, 'node_modules/@aiogram'), { recursive: true });
   fs.symlinkSync(repo, path.join(dir, 'node_modules/@aiogram/tgcloud-grammy'), 'dir');
   fs.symlinkSync(path.join(repo, 'node_modules/grammy'), path.join(dir, 'node_modules/grammy'), 'dir');
-  const init = () => spawnSync(process.execPath, [cli, 'init'], { cwd: dir, encoding: 'utf8' });
+  const init = (...args) => spawnSync(process.execPath, [cli, 'init', ...args], { cwd: dir, encoding: 'utf8' });
 
-  const first = init();
+  const first = init('--github-actions');
   assert.equal(first.status, 0, first.stderr + first.stdout);
   assert.ok(fs.existsSync(path.join(dir, 'src/lib/bot.ts')));
+  assert.match(fs.readFileSync(path.join(dir, '.github/workflows/deploy.yml'), 'utf8'), /tgcloud fetch[\s\S]*npm run deploy/);
   assert.match(fs.readFileSync(path.join(dir, 'tgcloud/handlers/message.js'), 'utf8'), /toHandler/); // built from src/
   const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts.deploy, 'tsc && tgcloud-grammy build && tgcloud push');
+  assert.equal(pkg.scripts.status, 'tgcloud-grammy build && tgcloud status');
+  assert.equal(pkg.scripts.run, 'tgcloud-grammy build && tgcloud run');
+  assert.equal(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8'), '.tgcloud/\nnode_modules/\n# Generated from src/ by tgcloud-grammy build\n/tgcloud/\n');
   assert.match(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'), /Intro\.\n\n## This project is TypeScript[\s\S]*## What this project is/);
 
   // Hand-written code in tgcloud/ is never deleted.

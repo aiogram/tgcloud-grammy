@@ -34,8 +34,8 @@ Verified on a real bot with `tgcloud run`: a grammY bundle built by this package
   - `schema` is built as its own module and imported by path, never inlined.
   - Dynamic `import()` fails the build.
   - A manifest stops it deleting modules it didn't write.
-- `src/init.ts`: `tgcloud-grammy init`. Runs `tgcloud init` if needed, then copies `templates/` (never overwriting). It deletes a `tgcloud/` module only if its sha256 matches `init_templates` in `.tgcloud/state.json`, and refuses if any other code is there. It also sets the scripts, adds the `templates/AGENTS.ts.md` section to `AGENTS.md`, and builds.
-- `create/`: the separate `@aiogram/create-tgcloud-grammy` package behind `npm create @aiogram/tgcloud-grammy <dir>`. Node built-ins only. It installs the tools, then runs `tgcloud-grammy init`, makes a git commit and offers a login. Set `TGCLOUD_GRAMMY_PACKAGE=/path/to/aiogram-tgcloud-grammy-x.y.z.tgz` to test it against an unpublished build.
+- `src/init.ts`: `tgcloud-grammy init`. Runs `tgcloud init` if needed, then copies `templates/` (never overwriting). It deletes a `tgcloud/` module only if its sha256 matches `init_templates` in `.tgcloud/state.json`, and refuses if any other code is there. It also gitignores `/tgcloud/` and makes `deploy`, `status` and `run` build first. It adds the `templates/AGENTS.ts.md` section to `AGENTS.md` and builds. `--github-actions` also copies `templates/github-deploy.yml` to `.github/workflows/deploy.yml`, which runs `npm ci`, `tgcloud fetch`, `npm run deploy` and `tgcloud migrate --safe` with the `TGCLOUD_TOKEN` secret.
+- `create/`: the separate `@aiogram/create-tgcloud-grammy` package behind `npm create @aiogram/tgcloud-grammy <dir>`. Node built-ins only. It asks about the GitHub Actions workflow (or takes `--github-actions`), installs the tools, runs `tgcloud-grammy init`, makes a git commit and offers a login. Set `TGCLOUD_GRAMMY_PACKAGE=/path/to/aiogram-tgcloud-grammy-x.y.z.tgz` to test it against an unpublished build.
 - `tsconfig.bot.json`: tsconfig preset for bot projects (exported as `@aiogram/tgcloud-grammy/tsconfig.json`).
 
 ## Commands
