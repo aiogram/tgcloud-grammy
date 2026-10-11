@@ -1,0 +1,1 @@
+{ "name": "sdk", "type": "module", "exports": { ".": "./index.js", "./db": "./db.js" } }

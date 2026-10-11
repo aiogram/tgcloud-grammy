@@ -10,3 +10,5 @@ yarn-error.log*
 
 .vscode/*
 /.idea
+/test/fixture/node_modules
+*.tgz

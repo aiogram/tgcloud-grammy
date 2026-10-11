@@ -1,12 +1,17 @@
 {
+  // Runtime code (bundled into bots): checked against the platform's globals only.
   "compilerOptions": {
-    "target": "es2016",
-    "module": "commonjs",
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "types": [],
     "strict": true,
     "skipLibCheck": true,
+    "declaration": true,
+    "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src"]
+  "include": ["src", "types"],
+  "exclude": ["src/cli.ts", "src/init.ts"]
 }

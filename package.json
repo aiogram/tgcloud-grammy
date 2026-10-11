@@ -1,14 +1,75 @@
 {
-  "name": "serverless_sdk",
-  "version": "1.0.0",
-  "description": "",
-  "main": "dist/index.js",
-  "scripts": {
-    "build": "tsc"
+  "name": "@aiogram/tgcloud-grammy",
+  "version": "0.1.0",
+  "description": "TypeScript, npm packages and grammY for Telegram Serverless (tgcloud) bots",
+  "keywords": [
+    "telegram",
+    "bot",
+    "serverless",
+    "tgcloud",
+    "grammy",
+    "typescript"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "tgcloud-grammy": "dist/cli.js"
   },
-  "dependencies": {},
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./grammy": {
+      "types": "./dist/grammy.d.ts",
+      "default": "./dist/grammy.js"
+    },
+    "./sdk": {
+      "types": "./types/sdk.d.ts"
+    },
+    "./tsconfig.json": "./tsconfig.bot.json"
+  },
+  "files": [
+    "dist",
+    "types",
+    "templates",
+    "tsconfig.bot.json"
+  ],
+  "scripts": {
+    "build": "tsc && tsc -p tsconfig.cli.json",
+    "test": "npm run build && node --test test/build.test.mjs",
+    "prepublishOnly": "npm test"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@grammyjs/types": "^5.0.0",
+    "esbuild": "^0.28.2"
+  },
+  "peerDependencies": {
+    "grammy": "^1.30.0"
+  },
+  "peerDependenciesMeta": {
+    "grammy": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@types/node": "^26.6.5",
+    "grammy": "^1.46.0",
     "typescript": "^6.0.3"
   },
-  "private": true
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "Alex Root Junior",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aiogram/tgcloud-grammy.git"
+  },
+  "homepage": "https://github.com/aiogram/tgcloud-grammy#readme",
+  "bugs": {
+    "url": "https://github.com/aiogram/tgcloud-grammy/issues"
+  }
 }
