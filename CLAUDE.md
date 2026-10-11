@@ -47,3 +47,4 @@ Verified on a real bot with `tgcloud run`: a grammY bundle built by this package
   - build the fixture with the CLI and run it through `test/run-bundle.mjs` against `test/mock-sdk`, with web globals deleted;
   - `init` on a fake `tgcloud init` project: starter files are replaced, hand-written modules are refused.
 - Single test: `node --test --test-name-pattern "type-checks" test/build.test.mjs` (after `npm run build`)
+- Release: push a `vX.Y.Z` tag. `.github/workflows/publish.yml` sets both `package.json` versions from the tag (not committed back), runs the tests, and publishes `@aiogram/tgcloud-grammy` and then `create/`. It authenticates with npm trusted publishing (OIDC, no token, provenance automatic), which is configured per package on npmjs.com for aiogram/tgcloud-grammy and `publish.yml`. A version that's already published is skipped, so a failed run can be re-run.

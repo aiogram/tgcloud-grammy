@@ -1,0 +1,58 @@
+# Publishes @aiogram/tgcloud-grammy and @aiogram/create-tgcloud-grammy to npm
+# when a vX.Y.Z tag is pushed:  git tag v0.2.0 && git push origin v0.2.0
+#
+# The version comes from the tag; package.json versions in the repo are not
+# used and not committed back.
+#
+# Authentication is npm trusted publishing (OIDC), no token: each package's
+# npmjs.com settings → Trusted publishing must name GitHub Actions,
+# aiogram / tgcloud-grammy / publish.yml, with `npm publish` allowed.
+# Provenance is added automatically.
+name: Publish
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+  id-token: write # OIDC token npm exchanges for publish rights
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Trusted publishing needs npm >= 11.5.1 and Node >= 22.14: Node 24 ships both.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false # never use caching in release builds
+
+      - run: npm ci
+
+      - name: Set version from tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          npm version "$version" --no-git-tag-version --allow-same-version
+          npm version "$version" --no-git-tag-version --allow-same-version --prefix create
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - run: npm test
+
+      # The main package first: the create package installs it. Each publish is
+      # skipped if that version is already on npm, so a failed run can be re-run.
+      - name: Publish
+        run: |
+          publish() {
+            name=$(node -p "require('./$1/package.json').name")
+            if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+              echo "$name@$VERSION is already published, skipping"
+            else
+              (cd "$1" && npm publish)
+            fi
+          }
+          publish .
+          publish create
